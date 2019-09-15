@@ -1,10 +1,10 @@
 package com.selman.exceptionhandling.controller;
 
+import com.selman.exceptionhandling.exception.type.IncorrectParameterException;
 import com.selman.exceptionhandling.model.Video;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import javax.validation.Valid;
 
 @RestController
 @RequestMapping("/video")
@@ -13,8 +13,10 @@ public class MyController {
 
 
     @GetMapping("/init-medianova")
-    public String initVideo(Video video){
+    public String initVideo2(@Valid Video video)  {
+        String[] a2 = {"1903"};
+        throw new IncorrectParameterException("selman",a2);
 
-        return "OK2";
+        //return "OK2";
     }
 }

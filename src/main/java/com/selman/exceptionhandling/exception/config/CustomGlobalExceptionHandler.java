@@ -12,6 +12,7 @@ import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.security.core.AuthenticationException;
@@ -33,48 +34,53 @@ public class CustomGlobalExceptionHandler {
     private static final String NO_MESSAGE_AVAILABLE = "No message available";
     private final MessageSource apiErrorMessageSource;
 
-    @ExceptionHandler(Exception.class)
-    ResponseEntity<MyErrorResponse> handleException(Exception exception, Locale locale, HttpServletRequest httpServletRequest, BindingResult bindingResult) {
+    @ExceptionHandler(BindException.class)
+    ResponseEntity<MyErrorResponse> handleBindException(Exception exception, Locale locale, HttpServletRequest httpServletRequest, BindingResult bindingResult) {
         log.error("Exception occured: request-uri:[{}], class: [{}], msg: [{}] \n{}", httpServletRequest.getRequestURI(), exception.getClass().getName(), exception.getMessage(), extractStackTrace(exception));
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(getApiBaseErrorResponse(exception, bindingResult));
+        return ResponseEntity.status(ApiErrorCode.INCORRECT_PARAMETER_EXCEPTION.httpStatus()).body(getInvalidParameterErrorResponse(bindingResult));
+    }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<MyErrorResponse> handleException(Exception exception, Locale locale, HttpServletRequest httpServletRequest) {
+        log.error("Exception occured: request-uri:[{}], class: [{}], msg: [{}] \n{}", httpServletRequest.getRequestURI(), exception.getClass().getName(), exception.getMessage(), extractStackTrace(exception));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(getApiBaseErrorResponse(exception));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     ResponseEntity<MyErrorResponse> handleAccessDeniedException(Exception exception, Locale locale, HttpServletRequest httpServletRequest, BindingResult bindingResult) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(getApiBaseErrorResponse(exception, bindingResult));
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(getApiBaseErrorResponse(exception));
     }
 
     @ExceptionHandler(BaseRuntimeException.class)
-    ResponseEntity<MyErrorResponse> handleServiceExceptions(BaseRuntimeException exception, Locale locale, HttpServletRequest httpServletRequest, BindingResult bindingResult) {
+    ResponseEntity<MyErrorResponse> handleServiceExceptions2(BaseRuntimeException exception, Locale locale, HttpServletRequest httpServletRequest) {
         ErrorCode errorCode = exception.getErrorCode();
 
 //        boolean ignoreErrorLog = (exception instanceof ApiAccessDeniedException) || (exception instanceof ClaimNotFoundException);
-        boolean ignoreErrorLog = true;
+        boolean ignoreErrorLog = false;
 
         if (! ignoreErrorLog) {
             log.error("Exception occured: request-uri:[{}], class: [{}], msg: [{}] \n{}", httpServletRequest.getRequestURI(), exception.getClass().getName(), exception.getMessage(), extractStackTrace(exception));
         }
 
-        return ResponseEntity.status(errorCode.httpStatus()).body(getApiBaseErrorResponse(exception, bindingResult));
+        return ResponseEntity.status(errorCode.httpStatus()).body(getApiBaseErrorResponse(exception));
     }
 
-    private MyErrorResponse getApiBaseErrorResponse(Exception ex, BindingResult bindingResult) {
+    private MyErrorResponse getInvalidParameterErrorResponse(BindingResult bindingResult){
+        List<FieldError> errors = bindingResult.getFieldErrors();
+        List<String> messages = new ArrayList<>();
+        String preMessage = "Validation is failed. ";
+
+        for (FieldError e : errors){
+            messages.add("@" + e.getField().toUpperCase() + ":" + e.getDefaultMessage());
+        }
+
+        return MyErrorResponse.builder().errorResponse(ErrorResponse.builder().code(ApiErrorCode.INVALID_PARAMETER.code()).message(preMessage + messages.toString()).build()).build();
+    }
+
+    private MyErrorResponse getApiBaseErrorResponse(Exception ex) {
         Optional<ErrorCode> maybeErrorCode = Optional.empty();
         Optional<Object[]> maybeParams = Optional.empty();
         Optional<String> maybeMessage = Optional.empty();
-
-        if (bindingResult.hasErrors()) {
-            List<FieldError> errors = bindingResult.getFieldErrors();
-            List<String> message = new ArrayList<>();
-
-            for (FieldError e : errors){
-                message.add("@" + e.getField().toUpperCase() + ":" + e.getDefaultMessage());
-            }
-            maybeErrorCode = Optional.of(ApiErrorCode.INVALID_PARAMETER);
-            maybeMessage = Optional.of("Validation is failed. ");
-
-            return MyErrorResponse.builder().errorResponse(ErrorResponse.builder().code(maybeErrorCode.get().code()).message(maybeMessage.get() + message.toString()).build()).build();
-        }
 
         if (ex instanceof AuthenticationException) {
             maybeErrorCode = Optional.of(ApiErrorCode.UNAUTHORIZED_ACCESS);
@@ -98,7 +104,7 @@ public class CustomGlobalExceptionHandler {
         errorResponseBuilder.message(NO_MESSAGE_AVAILABLE);
 
         if (maybeErrorCode.isPresent()) {
-            maybeMessage = Optional.ofNullable(apiErrorMessageSource.getMessage(maybeErrorCode.get().code(), maybeParams.isPresent() ? maybeParams.get() : null, LocaleContextHolder.getLocale()));
+            maybeMessage = Optional.ofNullable(apiErrorMessageSource.getMessage(maybeErrorCode.get().code(), maybeParams.orElse(null), LocaleContextHolder.getLocale()));
             errorResponseBuilder.code(maybeErrorCode.get().code());
         }
         if (maybeMessage.isPresent())
